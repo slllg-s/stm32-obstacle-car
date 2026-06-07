@@ -1,0 +1,25 @@
+# 编译产物
+*.o
+*.crf
+*.d
+*.dep
+*.axf
+*.hex
+*.htm
+*.map
+*.lnp
+*.sct
+*.Bak
+*.lst
+*.build_log.htm
+
+# Keil工程临时文件
+*.uvguix.*
+*.uvoptx
+*.dbgmgr
+DebugConfig/
+
+# Windows
+Thumbs.db
+Desktop.ini
+.DS_Store

@@ -1,0 +1,63 @@
+if((head<20)||(left<15)||(right<15))
+			{
+
+
+				if((head<8)||(left<5)||(right<5))
+				{
+					Behind(410,410);
+					delay_ms(50);
+				}
+				else if(left<15)							//15
+				{
+					Right(450,450);
+					delay_ms(50);
+				}
+				else if(right<15)			  //15
+				{
+					Left(450,450);
+					delay_ms(50);
+				}
+			}
+			
+			else if((head>30)&&(left>100)&&(right>40)&&(head<40))
+			{
+					Left(430,430);
+					delay_ms(3000);
+					GO(430,430);
+					delay_ms(2500);
+			}
+			else GO(430,430);
+
+
+///////////////////////////////////////////////
+			if((head<20)||(left<15)||(right<15))
+			{
+
+
+				if((head<8)||(left<5)||(right<5))
+				{
+					Behind(410,410);
+					delay_ms(50);
+				}
+				else if(left<15)							//15
+				{
+					Right(450,450);
+					delay_ms(50);
+				}
+				else if(right<15)			  //15
+				{
+					Left(450,450);
+					delay_ms(50);
+				}
+				else
+					GO(400,400);
+			}
+			
+			else if((head>30)&&(left>120)&&(right>50)&&(head<40))   //left 110,right 45
+			{
+					Left(430,430);
+					delay_ms(5000);
+					GO(430,430);
+					delay_ms(2500);
+			}
+			else GO(430,430);

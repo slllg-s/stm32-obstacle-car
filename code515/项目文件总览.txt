@@ -1,0 +1,327 @@
+================================================================================
+  STM32 三路超声波避障小车 — 项目文件总览
+================================================================================
+
+芯片型号: STM32F103C8T6 (中密度MD系列, Cortex-M3, 64K Flash / 20K SRAM)
+系统时钟: 72MHz (HSE 8MHz 晶体 → PLL x9)
+IDE:      Keil MDK-ARM (UV5)
+项目名:   PWM
+
+================================================================================
+一、目录结构
+================================================================================
+
+项目根目录: 03避障小车66\03避障小车66\
+
+├── CORE\                        — CMSIS 核心文件 (ST官方)
+│   ├── core_cm3.c                — Cortex-M3 内核函数实现
+│   ├── core_cm3.h                — Cortex-M3 内核函数头文件
+│   ├── startup_stm32f10x_hd.s    — 启动文件 (高密度, 备用)
+│   └── startup_stm32f10x_md.s    — 启动文件 (中密度, 当前使用)
+│
+├── STM32F10x_FWLib\             — ST标准外设库 V3.5.0
+│   ├── inc\                      — 外设库头文件 (24个外设)
+│   └── src\                      — 外设库源文件 (24个外设)
+│
+├── SYSTEM\                       — 系统层驱动 (正点原子)
+│   ├── delay\                    — 延时函数 (SysTick实现)
+│   ├── sys\                      — 系统函数 (WFI指令, 中断开关, 位带操作宏)
+│   └── usart\                    — 串口1驱动 (printf重定向, 中断接收)
+│
+├── HARDWARE\                     — 硬件驱动层 (用户编写)
+│   ├── GPIO\                     — GPIO初始化 + 电机运动控制
+│   ├── PWM\                      — TIM2 PWM输出 (电机调速)
+│   ├── READ\                     — 超声波测距 (HC-SR04 x3)
+│   ├── ENCODER\                  — 编码器读取 (轮速/里程计)
+│   ├── TIMER\                    — TIM4自由计数器 + 编码器EXTI初始化
+│   ├── AI\                       — 避障决策算法 (引用speed.h)
+│   ├── I2C\                      — 硬件I2C2驱动 (MPU6050用)
+│   ├── MPU6050\                  — 六轴传感器驱动 (陀螺仪+加速度计)
+│   ├── OLED\                     — OLED显示屏驱动 (SSD1306, 软件I2C)
+│   └── BUZZER\                   — 蜂鸣器驱动 (PB12, 低电平触发)
+│
+├── USER\                         — 用户应用层
+│   ├── main.c                    — 主程序 (含出口检测 + 调参指南注释)
+│   ├── speed.h                   — 速度与阈值集中配置文件 (新增)
+│   ├── stm32f10x.h               — MCU寄存器定义
+│   ├── stm32f10x_conf.h          — 外设库配置头文件
+│   ├── stm32f10x_it.c/.h         — 中断服务函数
+│   ├── system_stm32f10x.c/.h     — 系统时钟初始化
+│   └── DebugConfig\              — 调试配置文件
+│
+├── OBJ\                          — 编译中间产物 (.o .d .axf .hex)
+├── TIM.docx                      — 项目相关文档 (二进制)
+└── 调试代码保存.txt              — 旧版避障逻辑代码(备份)
+
+================================================================================
+二、引脚分配总表
+================================================================================
+
+【PIN】      【功能】              【模式】        【说明】
+PA0        TIM2_CH1 (PWM)        AF推挽输出    电机A PWM信号 (频率80KHz)
+PA1        TIM2_CH2 (PWM)        AF推挽输出    电机B PWM信号
+PA2        编码器1 脉冲         浮空输入      EXTI2下降沿中断 -> encoder1_count
+PA3        编码器1 方向         浮空输入      高电平=正转, 低电平=反转
+PA6        A1 (电机A方向)       推挽输出      与PA7配合控制电机A方向
+PA7        A2 (电机A方向)       推挽输出      与PA6配合控制电机A方向
+PA9        USART1_TX             AF推挽输出    串口调试输出 (9600bps)
+PA10       USART1_RX             浮空输入      串口调试接收
+PA11       正前方超声波Trig     推挽输出      发射20us高脉冲
+PA12       正前方超声波Echo     下拉输入      EXTI12中断 (上升沿->下降沿)
+PC13       左侧超声波Trig       推挽输出      发射20us高脉冲
+
+PB0        B1 (电机B方向)       推挽输出      与PB1配合控制电机B方向
+PB1        B2 (电机B方向)       推挽输出      与PB0配合控制电机B方向
+PB3        左侧超声波Echo       下拉输入      EXTI3中断 (需禁用JTAG)
+PB5        编码器2 脉冲         浮空输入      EXTI5下降沿中断 -> encoder2_count
+PB6        编码器2 方向         浮空输入      高电平=正转, 低电平=反转
+PB8        右侧超声波Trig       推挽输出      与OLED_SCL共享 (分时复用)
+PB9        右侧超声波Echo       下拉输入      EXTI9中断; 与OLED_SDA共享
+PB10       I2C2_SCL (MPU6050)   AF开漏输出   硬件I2C2时钟线 (400KHz)
+PB11       I2C2_SDA (MPU6050)   AF开漏输出   硬件I2C2数据线
+PB12       蜂鸣器               推挽输出     低电平触发(Buzzer_Beep发声100ms)
+
+【OLED引脚 (软件I2C, 分时复用PB8/PB9)】
+PB8        OLED_SCL             开漏输出      与右侧超声Trig分时复用
+PB9        OLED_SDA             开漏输出/上拉输入 与右侧超声Echo分时复用
+           OLED地址: 0x78 (SSD1306)
+
+【SWD调试 (保留)】
+PA13       SWDIO                 —            烧录/调试数据
+PA14       SWCLK                 —            烧录/调试时钟
+
+================================================================================
+三、各文件详细说明
+================================================================================
+
+3.1 CORE/ — CMSIS 核心层
+--------------------------------------------------------------------------------
+- core_cm3.c / .h: ARM CMSIS标准Cortex-M3内核函数。
+- startup_stm32f10x_md.s: 中密度启动文件 (C8T6专用)。
+  (1) 定义堆栈大小 (栈 0x400=1KB, 堆 0x200=512B)
+  (2) 建立中断向量表 (MD系列无FSMC/SDIO/TIM5-8/DMA2的向量)
+  (3) 复位后调用 SystemInit() -> __main() -> main()
+- startup_stm32f10x_hd.s: 高密度启动文件 (备用, 不参与编译)。
+
+3.2 STM32F10x_FWLib/ — ST标准外设库
+--------------------------------------------------------------------------------
+  ST官方V3.5.0标准外设库。
+  本项目实际使用的外设: GPIO, EXTI, TIM2, TIM4, USART1, I2C2, RCC, AFIO, NVIC
+
+3.3 SYSTEM/ — 系统层 (正点原子开发板方案)
+--------------------------------------------------------------------------------
+  delay.c / delay.h:
+    - delay_init(): 初始化SysTick, HCLK/8 (72/8=9MHz)
+    - delay_us(nus): 微秒延时
+    - delay_ms(nms): 毫秒延时 (最大1864ms@72MHz)
+
+  sys.c / sys.h:
+    - WFI_SET(): 执行WFI低功耗指令
+    - INTX_DISABLE()/ENABLE(): 关/开全局中断
+    - 位带操作宏: PAin(n)/PAout(n), PBin/PBout...
+    - 类型定义: u8/u16/u32/s8/s16/s32
+
+  usart.c / usart.h:
+    - uart_init(9600): USART1 (PA9-TX, PA10-RX), 波特率9600
+    - fputc() 重定向: printf -> USART1 发送
+    - 接收缓冲 200字节
+
+3.4 HARDWARE/ — 硬件驱动层
+--------------------------------------------------------------------------------
+  ◆ GPIO/gpio.c — GPIO初始化 + 电机运动控制
+    gpio_Init():
+      - 开启 GPIOA/B/C + AFIO 时钟
+      - 禁用JTAG保留SWD
+      - 电机方向脚、超声波Trig/Echo、编码器输入初始化
+
+    电机控制函数 (H桥方向逻辑):
+      GO(L,R):    PA6=1 PA7=0  PB0=1 PB1=0  -> 前进
+      Left(L,R):  PA6=1 PA7=0  PB0=0 PB1=1  -> 原地左转
+      Right(L,R): PA6=0 PA7=1  PB0=1 PB1=0  -> 原地右转
+      Behind(L,R):PA6=0 PA7=1  PB0=0 PB1=1  -> 后退
+      Stop():     PA6=0 PA7=0  PB0=0 PB1=0  -> 停止
+
+  ◆ PWM/pwm.c — 电机PWM输出
+    TIM2_PWM_Init(899, 0):
+      - TIM2时钟=72MHz, 周期=900 -> 80KHz
+      - CH1(PA0)电机A, CH2(PA1)电机B
+      - PWM模式2, 初始占空比=0
+
+  ◆ READ/read.c — 超声波测距 (HC-SR04 x3)
+    工作原理:
+      Trig发20us脉冲 -> 模块发8个40KHz -> Echo变高 ->
+      EXTI上升沿中断记录TIM4计数值 -> 切换下降沿触发 ->
+      EXTI下降沿中断计算脉宽val(us) -> 距离 = val * 170 * 0.0001 (cm)
+
+    struct us_status { u8 sta; u16 start_cnt; u16 val; }
+    Ultrasonic_EXTI_Init(): 配置EXTI3/9/12三路中断
+    read_qian()/zuo()/you(): 分别读三路距离, 超时返回99cm
+
+  ◆ TIMER/timer.c — 定时器 + 编码器初始化
+    TIM4_FreeRun_Init(0xFFFF, 71): 1MHz自由计数器, 供超声计时
+    编码器全局变量: volatile s32 encoder1_count, encoder2_count
+    Encoder_Init(): PA2->EXTI2, PB5->EXTI5
+
+  ◆ ENCODER/encoder.c — 编码器计数读取
+    Encoder_GetCount1()/2(): 返回当前脉冲计数
+    Encoder_ResetCount1()/2(): 清零计数
+
+  ◆ AI/ai.c — 避障决策算法 (所有阈值引用speed.h)
+    calculate(head, left, right):
+      1. (head<THR_HEAD_EMRG 或 side<THR_SIDE_EMRG) -> 紧急后退
+      2. (head<THR_HEAD_NEAR)                        -> 向开阔侧转弯
+      3. (left<THR_LEFT_NEAR)                         -> 右转
+      4. (right<THR_RIGHT_NEAR)                       -> 左转
+      5. (弯道检测条件)                                -> 左转探索
+      6. 其余                                        -> 直行
+
+  ◆ I2C/i2c.c — 硬件I2C2驱动 (MPU6050用)
+    I2C2_Init(): PB10/PB11 AF开漏, 400KHz
+    当前状态: 驱动完备, main.c中注释未启用
+
+  ◆ MPU6050/mpu6050.c — 六轴IMU驱动
+    当前状态: 驱动完备, main.c中注释未启用
+
+  ◆ OLED/oled.c — OLED显示屏驱动 (SSD1306, 软件I2C)
+    PB8/PB9与右侧超声波共用, 分时复用
+    当前状态: 驱动完备, main.c中注释未启用
+
+  ◆ BUZZER/buzzer.c — 蜂鸣器驱动 (PB12, 低电平触发) [新增]
+    Buzzer_Init(): PB12推挽输出, 默认高(不响)
+    Buzzer_On():   PB12置低 -> 长鸣
+    Buzzer_Off():  PB12置高 -> 关闭
+    Buzzer_Beep(): On + 100ms + Off -> 响一声
+    独立模块, 零耦合。
+
+3.5 USER/ — 用户应用层
+--------------------------------------------------------------------------------
+  ◆ speed.h — 速度与阈值集中配置 [新增]
+    所有可调参数集中在此, 无需深入 ai.c / main.c:
+    - 电机速度: SPEED_GO_L/R(150), SPEED_TURN_L/R(150), SPEED_BACK_L/R(140)
+    - 避障距离: THR_HEAD_EMRG(8), THR_SIDE_EMRG(5), THR_HEAD_NEAR(20),
+                THR_LEFT_NEAR(12), THR_RIGHT_NEAR(12)
+    - 弯道检测: THR_CURVE_HEAD_LO(25), THR_CURVE_HEAD_HI(45), THR_CURVE_LEFT(120)
+    - 出口检测: EXIT_SIDE_LOW(60), EXIT_SIDE_HIGH(80), EXIT_JUMP_DELTA(30),
+                EXIT_HEAD_MIN(25), EXIT_STABLE_CNT(3), EXIT_COOLDOWN(40)
+    - 动作延时: DELAY_EMRG(50), DELAY_TURN(50), DELAY_CURVE(80) ms
+
+  ◆ main.c — 主程序 (含出口检测 + 调参指南注释)
+    初始化顺序:
+      delay_init() -> gpio_Init() -> Buzzer_Init() (响一声表启动)
+      -> TIM2_PWM_Init(899,0) -> TIM4_FreeRun_Init(0xFFFF,71)
+      -> Ultrasonic_EXTI_Init() -> Encoder_Init() -> uart_init(9600)
+
+    主循环:
+      read三路距离 -> printf输出 -> calculate(避障决策, 引用speed.h)
+      -> IsExitPassing(出口检测, 波谷法) -> Buzzer_Beep()
+
+    出口检测 IsExitPassing() — 波谷法:
+      持续追踪左右超声距离的近期最小值(波谷)。
+      触发: 两侧波谷都 < EXIT_SIDE_LOW(60cm) 且
+            两侧当前值都 > EXIT_SIDE_HIGH(80cm)
+      即"先跌入窄口, 后回升驶出"。
+      前方 < EXIT_HEAD_MIN 或超声超时(99cm) 则重置。
+      串口每10周期打印 [EXIT] 调试数据。
+      该函数独立于避障逻辑, 仅控制 Buzzer_Beep()。
+
+  ◆ stm32f10x_it.c — 中断服务函数
+    EXTI2_IRQHandler():      编码器1脉冲计数
+    EXTI3_IRQHandler():      左侧超声Echo
+    EXTI9_5_IRQHandler():    编码器2脉冲 + 右侧超声Echo
+    EXTI15_10_IRQHandler():  正前超声Echo
+
+  ◆ system_stm32f10x.c — 系统时钟
+    时钟树: HSE 8MHz -> PLL x9 -> 72MHz SYSCLK
+           AHB=72MHz, APB2=72MHz, APB1=36MHz
+
+================================================================================
+四、数据流向图
+================================================================================
+
+  [HC-SR04 x3]           [编码器 x2]        [PB12 蜂鸣器]
+      |                      |                    |
+    EXTI中断              EXTI中断              GPIO
+  上升沿/下降沿          下降沿计数           Buzzer_Beep()
+      |                      |                    ^
+   TIM4计时                encoder_count         |
+      |                      |                    |
+   距离(cm)              Encoder_GetCount()       |
+      |                      |                    |
+      v                      v                    |
+  read_qian/zuo/you         (备用)               |
+      |                                           |
+   calculate(head,left,right)                    |
+   (引用speed.h阈值)                              |
+   ┌─ 紧急: 后退                                  |
+   ├─ 前方<THR: 向开阔侧转                        |
+   ├─ 左侧<THR: 右转                              |
+   ├─ 右侧<THR: 左转                              |
+   ├─ 疑似弯道: 左转探索                          |
+   └─ 默认: 直行                                  |
+      |                                           |
+  GO/Left/Right/Behind(L,R)                       |
+      |                                           |
+  4方向IO + TIM2 PWM (PA0/1)                      |
+      |                                           |
+  [电机驱动+直流减速电机]                          |
+                                                  |
+  IsExitPassing(qian, zuo, you) ------------------+
+  (波谷法, 独立于避障, 仅控蜂鸣器)
+
+================================================================================
+五、中断向量表 (本项目使用的)
+================================================================================
+
+中断号    中断名称              实际功能
+EXTI2     EXTI2_IRQHandler      编码器1脉冲计数
+EXTI3     EXTI3_IRQHandler      左侧超声Echo
+EXTI9_5   EXTI9_5_IRQHandler    右侧超声Echo + 编码器2脉冲
+EXTI15_10 EXTI15_10_IRQHandler  正前方超声Echo
+USART1    USART1_IRQHandler     串口数据接收
+SysTick   SysTick_Handler       系统节拍(延时)
+
+NVIC优先级分组: 2
+超声波/编码器抢占优先级=2, 串口抢占优先级=3
+
+================================================================================
+六、关键技术参数
+================================================================================
+
+  系统时钟:        72MHz
+  PWM频率:         80KHz (72M/900)
+  超声波计时器:    1MHz (72M/72), 分辨率1us
+  超声波测距公式:  距离(cm) = 脉宽(us) x 0.017
+  串口波特率:      9600bps
+  I2C速率:         400KHz
+  栈/堆:           1KB / 512B
+  蜂鸣器引脚:      PB12, 低电平触发
+
+================================================================================
+七、电机控制真值表
+================================================================================
+
+  函数       PA6(A1)  PA7(A2)  PB0(B1)  PB1(B2)  小车运动
+  ---------------------------------------------------------
+  GO          1        0        1        0       前进
+  Left        1        0        0        1       原地左转
+  Right       0        1        1        0       原地右转
+  Behind      0        1        0        1       后退
+  Stop        0        0        0        0       停止
+
+================================================================================
+八、注意事项
+================================================================================
+
+  1. PB3 (左侧超声Echo): 需禁用JTAG保留SWD。
+  2. PB8/PB9 (右侧超声/Oled): 分时复用, 超声测距时不可OLED显示。
+  3. PB2是BOOT1, 不可用。PA13/PA14是SWD, 保留。
+  4. 超声波read_distance()阻塞等待(超时100ms), 三路测距耗时数十ms。
+  5. AI避障阈值在speed.h集中配置, 修改无需深入ai.c。
+  6. 出口检测阈值在speed.h, 串口每10周期打印调试数据便于调参。
+  7. MPU6050和OLED驱动代码完备但未启用。
+  8. 编码器EXTI2独立NVIC, EXTI5的NVIC由Ultrasonic_EXTI_Init配置。
+  9. MCU为C8T6(MD), 编译时Define=STM32F10X_MD, 启动文件=_md.s。
+
+================================================================================
+                    文档更新日期: 2026-05-15
+================================================================================
